@@ -51,4 +51,45 @@ describe('IndexPatternsApiServer', () => {
       })
     );
   });
+
+  describe('projectRouting', () => {
+    const createServer = (defaultProjectRouting?: string) =>
+      new IndexPatternsApiServer(
+        coreRequestHandler.elasticsearch.client.asInternalUser,
+        coreRequestHandler.savedObjects.client,
+        coreRequestHandler.uiSettings.client,
+        false,
+        defaultProjectRouting
+      );
+
+    it('passes the constructor default projectRouting when no explicit value is provided', async () => {
+      const server = createServer('@kibana_space_default_default');
+
+      await server.getFieldsForWildcard({ pattern: '*' });
+
+      expect(getFieldsForWildcard).toHaveBeenCalledWith(
+        expect.objectContaining({ projectRouting: '@kibana_space_default_default' })
+      );
+    });
+
+    it('lets an explicit projectRouting option override the constructor default', async () => {
+      const server = createServer('@kibana_space_default_default');
+
+      await server.getFieldsForWildcard({ pattern: '*', projectRouting: 'explicit-routing' });
+
+      expect(getFieldsForWildcard).toHaveBeenCalledWith(
+        expect.objectContaining({ projectRouting: 'explicit-routing' })
+      );
+    });
+
+    it('passes undefined projectRouting when neither a default nor an explicit value is set', async () => {
+      const server = createServer();
+
+      await server.getFieldsForWildcard({ pattern: '*' });
+
+      expect(getFieldsForWildcard).toHaveBeenCalledWith(
+        expect.objectContaining({ projectRouting: undefined })
+      );
+    });
+  });
 });

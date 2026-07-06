@@ -39,7 +39,8 @@ export const dataViewsServiceFactory = (deps: DataViewsServiceFactoryDeps) =>
     savedObjectsClient: SavedObjectsClientContract,
     elasticsearchClient: ElasticsearchClient,
     request?: KibanaRequest,
-    byPassCapabilities?: boolean
+    byPassCapabilities?: boolean,
+    projectRouting?: string
   ) {
     const { logger, uiSettings, fieldFormats, capabilities, rollupsEnabled } = deps;
     const uiSettingsClient = uiSettings.asScopedToClient(savedObjectsClient);
@@ -52,7 +53,8 @@ export const dataViewsServiceFactory = (deps: DataViewsServiceFactoryDeps) =>
         elasticsearchClient,
         savedObjectsClient,
         uiSettingsClient,
-        rollupsEnabled
+        rollupsEnabled,
+        projectRouting
       ),
       fieldFormats: formats,
       onError: (error) => {

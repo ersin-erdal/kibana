@@ -38,7 +38,14 @@ type ServiceFactory = (
   /**
    * Ignore capabilities
    */
-  byPassCapabilities?: boolean
+  byPassCapabilities?: boolean,
+  /**
+   * Cross-Project Search (CPS) `project_routing` expression to inject into every
+   * `fieldCaps` request made by the service. Required when the service is created with an
+   * internal-user Elasticsearch client (which is always origin-only routed) but the field
+   * lookups must fan out across CPS-connected projects (e.g. alerting rule execution).
+   */
+  projectRouting?: string
 ) => Promise<DataViewsService>;
 
 /**

@@ -22,7 +22,8 @@ export class IndexPatternsApiServer implements IDataViewsApiClient {
     private readonly esClient: ElasticsearchClient,
     private readonly savedObjectsClient: SavedObjectsClientContract,
     private readonly uiSettingsClient: IUiSettingsClient,
-    private readonly rollupsEnabled: boolean
+    private readonly rollupsEnabled: boolean,
+    private readonly defaultProjectRouting?: string
   ) {}
   async getFieldsForWildcard({
     pattern,
@@ -55,7 +56,7 @@ export class IndexPatternsApiServer implements IDataViewsApiClient {
         abortSignal,
         runtimeMappings,
         allowHidden,
-        projectRouting,
+        projectRouting: projectRouting ?? this.defaultProjectRouting,
       })
       .catch((err) => {
         if (

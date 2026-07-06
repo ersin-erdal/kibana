@@ -12,6 +12,8 @@ import type {
 } from '@kbn/core/server';
 import type { DataViewsContract } from '@kbn/data-views-plugin/common';
 import type { AsScopedOptions } from '@kbn/core-elasticsearch-server';
+import { getSpaceNPRE } from '@kbn/cps-server-utils';
+import { asSpaceId } from '@kbn/core-spaces-common';
 import { RULE_SAVED_OBJECT_TYPE } from '..';
 import { getEsRequestTimeout } from '../lib';
 import type { CpsData } from '../types';
@@ -67,6 +69,11 @@ const projectRouting: AsScopedOptions = {
 export const getExecutorServices = (opts: GetExecutorServicesOpts): ExecutorServices => {
   const { context, abortController, fakeRequest, logger, ruleData, ruleTaskTimeout } = opts;
 
+  // The data views service is created with an internal-user ES client, which is always
+  // origin-only routed. To match the space routing used by the search/search-source clients,
+  // resolve the space NPRE expression and inject it explicitly into the data views field caps calls.
+  const dataViewsProjectRouting = getSpaceNPRE(asSpaceId(ruleData.spaceId));
+
   const wrappedClientOptions = {
     rule: ruleData,
     logger,
@@ -98,7 +105,10 @@ export const getExecutorServices = (opts: GetExecutorServicesOpts): ExecutorServ
       const dataViews = await withAlertingSpan('alerting:get-data-views-factory', () =>
         context.dataViews.dataViewsServiceFactory(
           savedObjectsClient,
-          scopedClusterClient.asInternalUser
+          scopedClusterClient.asInternalUser,
+          undefined,
+          undefined,
+          dataViewsProjectRouting
         )
       );
       return dataViews;

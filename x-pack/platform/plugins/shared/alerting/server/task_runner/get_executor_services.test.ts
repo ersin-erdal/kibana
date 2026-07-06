@@ -17,6 +17,8 @@ import { ruleMonitoringServiceMock } from '../monitoring/rule_monitoring_service
 import { ruleResultServiceMock } from '../monitoring/rule_result_service.mock';
 import type { AsScopedOptions } from '@kbn/core-elasticsearch-server';
 import { ESQL_ASYNC_SEARCH_STRATEGY } from '@kbn/data-plugin/common';
+import { getSpaceNPRE } from '@kbn/cps-server-utils';
+import { asSpaceId } from '@kbn/core-spaces-common';
 
 jest.mock('../lib/wrap_scoped_cluster_client', () => ({
   createWrappedScopedClusterClientFactory: jest.fn().mockReturnValue({}),
@@ -148,6 +150,52 @@ describe('getExecutorServices', () => {
 
       expect(dataSearchAsScoped).toHaveBeenCalledTimes(1);
       expect(dataSearchAsScoped).toHaveBeenCalledWith(fakeRequest, projectRouting);
+    });
+
+    it('creates the data views service with the space NPRE as explicit projectRouting', async () => {
+      const context = createMockContext();
+      const fakeRequest = createFakeRequest();
+      const dataViewsServiceFactory = context.dataViews.dataViewsServiceFactory as jest.Mock;
+
+      const executorServices = getExecutorServices({
+        context,
+        fakeRequest,
+        abortController,
+        logger,
+        ruleMonitoringService,
+        ruleResultService,
+        ruleData,
+      });
+
+      await executorServices.getDataViews();
+
+      expect(dataViewsServiceFactory).toHaveBeenCalledTimes(1);
+      // request and byPassCapabilities are intentionally left undefined so the internal-user
+      // auth principal is preserved; only the explicit projectRouting is added.
+      const call = dataViewsServiceFactory.mock.calls[0];
+      expect(call[2]).toBeUndefined();
+      expect(call[3]).toBeUndefined();
+      expect(call[4]).toBe(getSpaceNPRE(asSpaceId('default')));
+    });
+
+    it('threads the rule spaceId into the resolved data views projectRouting', async () => {
+      const context = createMockContext();
+      const fakeRequest = createFakeRequest();
+      const dataViewsServiceFactory = context.dataViews.dataViewsServiceFactory as jest.Mock;
+
+      const executorServices = getExecutorServices({
+        context,
+        fakeRequest,
+        abortController,
+        logger,
+        ruleMonitoringService,
+        ruleResultService,
+        ruleData: { ...ruleData, spaceId: 'my-space' },
+      });
+
+      await executorServices.getDataViews();
+
+      expect(dataViewsServiceFactory.mock.calls[0][4]).toBe(getSpaceNPRE(asSpaceId('my-space')));
     });
   });
 });
