@@ -11,8 +11,23 @@ import type { ProjectTagsResponse } from '@kbn/cps-utils';
 import { asSpaceId } from '@kbn/core-spaces-common';
 import type { CpsData } from '../types';
 
+/**
+ * Resolves the CPS scope metadata (routing expression + linked projects) recorded on alert
+ * documents and the event log.
+ *
+ * The two Elasticsearch endpoints require different principals:
+ * - `/_project_routing/{npre}` resolves the space's routing expression. It is space configuration,
+ *   identical for every principal, and an operator-only endpoint, so it is called with the
+ *   internal (operator) user. This is reliable and avoids the `security_exception` a rule's scoped
+ *   API key would otherwise raise (see #276771).
+ * - `/_project/tags` returns the linked projects visible to the caller (role-filtered). To reflect
+ *   the scope the rule execution actually targets (its owner's project visibility), it is called as
+ *   the current user. If the rule's API key lacks the privilege the call fails silently, so linked
+ *   projects are reported as empty rather than over-reported.
+ */
 export const resolveCpsData = async (
-  esClient: ElasticsearchClient,
+  internalUserEsClient: ElasticsearchClient,
+  currentUserEsClient: ElasticsearchClient,
   spaceId: string,
   logger: Logger
 ): Promise<CpsData> => {
@@ -20,20 +35,22 @@ export const resolveCpsData = async (
   const npreName = npreRef.replace(/^@/, '');
 
   try {
-    const resolvedExpression = await esClient.transport
+    const resolvedExpression = await internalUserEsClient.transport
       .request<{ [key: string]: { expression: string } }>({
         method: 'GET',
         path: `/_project_routing/${npreName}`,
       })
       .then((res) => res[npreName]?.expression ?? PROJECT_ROUTING_ALL)
       .catch((error: { statusCode?: number }) => {
-        if (error?.statusCode === 404) {
+        // A missing routing expression (404) or an insufficient privilege (403) both fall back to
+        // the default "all projects" scope rather than failing the whole resolution.
+        if (error?.statusCode === 404 || error?.statusCode === 403) {
           return PROJECT_ROUTING_ALL;
         }
         throw error;
       });
 
-    const tagsResponse = await esClient.transport
+    const tagsResponse = await currentUserEsClient.transport
       .request<ProjectTagsResponse>({
         method: 'GET',
         path: '/_project/tags',
