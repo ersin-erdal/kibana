@@ -102,10 +102,7 @@ export class AdHocTaskRunner implements CancellableTask {
   private stackTraceLog: RuleRunnerErrorStackTraceLog | null = null;
   private taskRunning: AdHocTaskRunningHandler;
   private timer: TaskRunnerTimer;
-  private apiKeyToUse: string | null = null;
-  private uiamApiKey: string | undefined;
-  private apiKeyCreatedByUser: boolean | null | undefined;
-  private apiKeyOwner: string | null | undefined;
+  private fakeRequest: KibanaRequest | null = null;
 
   constructor({
     context,
@@ -389,10 +386,6 @@ export class AdHocTaskRunner implements CancellableTask {
       }
 
       const { rule, apiKeyToUse, uiamApiKey, schedule, start, end } = adHocRunData;
-      this.apiKeyToUse = apiKeyToUse;
-      this.uiamApiKey = uiamApiKey;
-      this.apiKeyCreatedByUser = rule.apiKeyCreatedByUser;
-      this.apiKeyOwner = rule.apiKeyOwner;
       this.adHocRunData = adHocRunData;
 
       let ruleType: UntypedNormalizedRuleType;
@@ -495,6 +488,9 @@ export class AdHocTaskRunner implements CancellableTask {
           ruleId: rule.id,
         }
       );
+      // Stash the built request so the cleanup path (updateGapsAfterBackfillComplete)
+      // reuses the exact same credentials instead of rebuilding it from scratch.
+      this.fakeRequest = fakeRequest;
 
       return {
         adHocRunData,
@@ -717,22 +713,12 @@ export class AdHocTaskRunner implements CancellableTask {
   }
 
   private async updateGapsAfterBackfillComplete() {
-    if (this.scheduleToRunIndex < 0 || !this.adHocRange) return null;
+    if (this.scheduleToRunIndex < 0 || !this.adHocRange || !this.fakeRequest) return null;
 
-    const { fakeRequest } = getFakeKibanaRequest(
-      this.context,
-      this.taskInstance.params.spaceId,
-      this.apiKeyToUse,
-      {
-        uiamApiKey: this.uiamApiKey,
-        apiKeyCreatedByUser: this.apiKeyCreatedByUser,
-        apiKeyOwner: this.apiKeyOwner,
-        ruleId: this.ruleId,
-      }
+    const eventLogClient = await this.context.getEventLogClient(this.fakeRequest);
+    const actionsClient = await this.context.actionsPlugin.getActionsClientWithRequest(
+      this.fakeRequest
     );
-
-    const eventLogClient = await this.context.getEventLogClient(fakeRequest);
-    const actionsClient = await this.context.actionsPlugin.getActionsClientWithRequest(fakeRequest);
     return updateGaps({
       ruleId: this.ruleId,
       start: new Date(this.adHocRange.start),
