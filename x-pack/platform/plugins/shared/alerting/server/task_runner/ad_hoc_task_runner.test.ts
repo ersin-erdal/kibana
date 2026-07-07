@@ -823,6 +823,7 @@ describe('Ad Hoc Task Runner', () => {
       context: uiamContext,
       internalSavedObjectsRepository,
       taskInstance: mockedTaskInstance,
+      executionUuid: UUID,
     });
 
     await taskRunner.run();
