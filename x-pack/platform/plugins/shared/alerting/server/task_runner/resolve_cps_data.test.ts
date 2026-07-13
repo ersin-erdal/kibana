@@ -68,7 +68,7 @@ describe('resolveCpsData', () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it('falls back to PROJECT_ROUTING_ALL on 403 without logging a warning', async () => {
+  it('falls back to PROJECT_ROUTING_ALL on 403 and logs a warning', async () => {
     internalUserEsClient.transport.request.mockRejectedValueOnce({ statusCode: 403 });
     currentUserEsClient.transport.request.mockResolvedValueOnce({ linked_projects: {} });
 
@@ -83,7 +83,7 @@ describe('resolveCpsData', () => {
       resolvedExpression: PROJECT_ROUTING_ALL,
       linkedProjects: [],
     });
-    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Unexpected 403'));
   });
 
   it('returns empty linkedProjects and logs warning on unexpected error', async () => {

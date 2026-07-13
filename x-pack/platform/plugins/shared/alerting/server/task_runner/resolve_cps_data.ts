@@ -42,9 +42,18 @@ export const resolveCpsData = async (
       })
       .then((res) => res[npreName]?.expression ?? PROJECT_ROUTING_ALL)
       .catch((error: { statusCode?: number }) => {
-        // A missing routing expression (404) or an insufficient privilege (403) both fall back to
-        // the default "all projects" scope rather than failing the whole resolution.
-        if (error?.statusCode === 404 || error?.statusCode === 403) {
+        // A missing routing expression (404) is a legitimate "no routing configured" case: fall
+        // back to the default "all projects" scope silently.
+        if (error?.statusCode === 404) {
+          return PROJECT_ROUTING_ALL;
+        }
+        // The internal user should always be authorized for this operator-only endpoint, so a 403
+        // signals a misconfiguration rather than an expected condition. Fall back to the default
+        // scope so rule execution is not broken, but surface it so the problem is not hidden.
+        if (error?.statusCode === 403) {
+          logger.warn(
+            `Unexpected 403 resolving project routing for space "${spaceId}"; the internal user should be authorized for /_project_routing. Falling back to all projects.`
+          );
           return PROJECT_ROUTING_ALL;
         }
         throw error;
