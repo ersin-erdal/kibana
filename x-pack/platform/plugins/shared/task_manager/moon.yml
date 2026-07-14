@@ -34,6 +34,7 @@ dependsOn:
   - '@kbn/alerting-state-types'
   - '@kbn/core-saved-objects-api-server'
   - '@kbn/logging'
+  - '@kbn/core-feature-flags-server-mocks'
   - '@kbn/core-lifecycle-server'
   - '@kbn/cloud-plugin'
   - '@kbn/core-saved-objects-base-server-internal'
