@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import type { Observable } from 'rxjs';
+import type { Observable, Subscription } from 'rxjs';
 import { Subject, withLatestFrom, BehaviorSubject } from 'rxjs';
 import { distinctUntilChanged, startWith } from 'rxjs';
 import { pipe } from 'fp-ts/pipeable';
@@ -115,6 +115,8 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
   private poller: TaskPoller<string, TimedFillPoolResult>;
   private started = false;
   private stopped = false;
+  private resumeInFlightTasksOnStartup = false;
+  private featureFlagsSubscription?: Subscription;
 
   public pool: TaskPool;
 
@@ -130,7 +132,6 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
   private config: TaskManagerConfig;
   private currentPollInterval: number;
   private apiKeyStrategy: ApiKeyStrategy;
-  private featureFlags: FeatureFlagsStart;
   private currentTmUtilization$ = new BehaviorSubject<number>(0);
   private enrichFakeRequest?: FakeRequestEnricher;
 
@@ -166,7 +167,15 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
     this.usageCounter = usageCounter;
     this.config = config;
     this.apiKeyStrategy = apiKeyStrategy;
-    this.featureFlags = featureFlags;
+    // Cache the feature flag so the availability handler can branch
+    // synchronously and keep the poller start on the hot path free of an
+    // extra async hop when the feature is disabled (the default).
+    this.featureFlagsSubscription = featureFlags
+      .getBooleanValue$(RESUME_IN_FLIGHT_TASKS_ON_STARTUP_FEATURE_FLAG, false)
+      .pipe(distinctUntilChanged())
+      .subscribe((enabled) => {
+        this.resumeInFlightTasksOnStartup = enabled;
+      });
     this.enrichFakeRequest = enrichFakeRequest;
     const { poll_interval: pollInterval, claim_strategy: claimStrategy } = config;
     this.currentPollInterval = pollInterval;
@@ -258,28 +267,26 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
         // set synchronously so repeat availability emissions (e.g. ES
         // reconnects) can never trigger a second reconciliation or poller start
         this.started = true;
-        // fire-and-forget: reconcileAndStartPolling never rejects (it handles
-        // its own errors) and starts the poller when it settles
-        void this.reconcileAndStartPolling();
+        if (this.resumeInFlightTasksOnStartup) {
+          // fire-and-forget: reconcileAndStartPolling never rejects (it handles
+          // its own errors) and starts the poller when it settles
+          void this.reconcileAndStartPolling();
+        } else {
+          this.poller.start();
+        }
       }
     });
   }
 
   /**
    * Before the first poll, reset tasks this node still owns from a previous run
-   * (e.g. after a crash) so they don't wait out their retryAt timeout. Gated
-   * behind a feature flag and best-effort: the poller starts regardless of the
-   * outcome, and the retryAt timeout remains the safety net.
+   * (e.g. after a crash) so they don't wait out their retryAt timeout.
+   * Best-effort: the poller starts regardless of the outcome, and the retryAt
+   * timeout remains the safety net.
    */
   private async reconcileAndStartPolling() {
     try {
-      const resumeInFlightTasks = await this.featureFlags.getBooleanValue(
-        RESUME_IN_FLIGHT_TASKS_ON_STARTUP_FEATURE_FLAG,
-        false
-      );
-      if (resumeInFlightTasks) {
-        await resetInFlightTasksOwnedByThisNode({ logger: this.logger, taskStore: this.store });
-      }
+      await resetInFlightTasksOwnedByThisNode({ logger: this.logger, taskStore: this.store });
     } catch (e) {
       this.logger.error(
         `Failed to reconcile in-flight tasks on startup, starting the poller anyway: ${e.message}`
@@ -297,6 +304,7 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
 
   public stop() {
     this.stopped = true;
+    this.featureFlagsSubscription?.unsubscribe();
     this.poller.stop();
   }
 

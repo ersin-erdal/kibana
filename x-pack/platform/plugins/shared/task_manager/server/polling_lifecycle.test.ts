@@ -6,7 +6,7 @@
  */
 
 import sinon from 'sinon';
-import { Subject } from 'rxjs';
+import { Subject, of } from 'rxjs';
 
 import type { TaskLifecycleEvent } from './polling_lifecycle';
 import { TaskPollingLifecycle, claimAvailableTasks } from './polling_lifecycle';
@@ -159,7 +159,7 @@ describe('TaskPollingLifecycle', () => {
     (TaskManagerRunner as jest.Mock).mockClear();
     resetInFlightTasksMock.mockReset().mockResolvedValue(undefined);
     // resume-in-flight-tasks feature enabled by default in these tests
-    mockFeatureFlags.getBooleanValue.mockReset().mockResolvedValue(true);
+    mockFeatureFlags.getBooleanValue$.mockReset().mockReturnValue(of(true));
     clock = sinon.useFakeTimers();
   });
 
@@ -260,7 +260,7 @@ describe('TaskPollingLifecycle', () => {
 
     test('skips the startup task reconciliation when the feature flag is disabled', async () => {
       clock.restore();
-      mockFeatureFlags.getBooleanValue.mockResolvedValue(false);
+      mockFeatureFlags.getBooleanValue$.mockReturnValue(of(false));
       const elasticsearchAndSOAvailability$ = new Subject<boolean>();
       new TaskPollingLifecycle({ ...taskManagerOpts, elasticsearchAndSOAvailability$ });
 
