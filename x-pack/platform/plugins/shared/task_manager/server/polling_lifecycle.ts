@@ -12,7 +12,7 @@ import { pipe } from 'fp-ts/pipeable';
 import { map as mapOptional, none } from 'fp-ts/Option';
 import { tap } from 'rxjs';
 import type { UsageCounter } from '@kbn/usage-collection-plugin/server';
-import type { Logger, ExecutionContextStart } from '@kbn/core/server';
+import type { Logger, ExecutionContextStart, FeatureFlagsStart } from '@kbn/core/server';
 import type { FakeRequestEnricher } from '@kbn/core-security-server';
 
 import type { Result } from './lib/result_type';
@@ -63,6 +63,10 @@ import {
   ADJUST_THROUGHPUT_INTERVAL,
 } from './lib/create_managed_configuration';
 import { createRunningAveragedStat } from './monitoring/task_run_calculators';
+import {
+  RESUME_IN_FLIGHT_TASKS_ON_STARTUP_FEATURE_FLAG,
+  resetInFlightTasksOwnedByThisNode,
+} from './lib/task_reconciliation';
 
 const MAX_BUFFER_OPERATIONS = 100;
 
@@ -77,6 +81,7 @@ export interface TaskPollingLifecycleOpts {
   config: TaskManagerConfig;
   middleware: Middleware;
   elasticsearchAndSOAvailability$: Observable<boolean>;
+  featureFlags: FeatureFlagsStart;
   executionContext: ExecutionContextStart;
   usageCounter?: UsageCounter;
   taskPartitioner: TaskPartitioner;
@@ -109,6 +114,7 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
   private logger: Logger;
   private poller: TaskPoller<string, TimedFillPoolResult>;
   private started = false;
+  private stopped = false;
 
   public pool: TaskPool;
 
@@ -124,6 +130,7 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
   private config: TaskManagerConfig;
   private currentPollInterval: number;
   private apiKeyStrategy: ApiKeyStrategy;
+  private featureFlags: FeatureFlagsStart;
   private currentTmUtilization$ = new BehaviorSubject<number>(0);
   private enrichFakeRequest?: FakeRequestEnricher;
 
@@ -140,6 +147,7 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
     config,
     // Elasticsearch and SavedObjects availability status
     elasticsearchAndSOAvailability$,
+    featureFlags,
     taskStore,
     definitions,
     executionContext,
@@ -158,6 +166,7 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
     this.usageCounter = usageCounter;
     this.config = config;
     this.apiKeyStrategy = apiKeyStrategy;
+    this.featureFlags = featureFlags;
     this.enrichFakeRequest = enrichFakeRequest;
     const { poll_interval: pollInterval, claim_strategy: claimStrategy } = config;
     this.currentPollInterval = pollInterval;
@@ -246,10 +255,38 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
 
     elasticsearchAndSOAvailability$.subscribe((areESAndSOAvailable) => {
       if (areESAndSOAvailable && !this.started) {
-        this.poller.start();
+        // set synchronously so repeat availability emissions (e.g. ES
+        // reconnects) can never trigger a second reconciliation or poller start
         this.started = true;
+        this.reconcileAndStartPolling();
       }
     });
+  }
+
+  /**
+   * Before the first poll, reset tasks this node still owns from a previous run
+   * (e.g. after a crash) so they don't wait out their retryAt timeout. Gated
+   * behind a feature flag and best-effort: the poller starts regardless of the
+   * outcome, and the retryAt timeout remains the safety net.
+   */
+  private async reconcileAndStartPolling() {
+    try {
+      const resumeInFlightTasks = await this.featureFlags.getBooleanValue(
+        RESUME_IN_FLIGHT_TASKS_ON_STARTUP_FEATURE_FLAG,
+        false
+      );
+      if (resumeInFlightTasks) {
+        await resetInFlightTasksOwnedByThisNode({ logger: this.logger, taskStore: this.store });
+      }
+    } catch (e) {
+      this.logger.error(
+        `Failed to reconcile in-flight tasks on startup, starting the poller anyway: ${e.message}`
+      );
+    } finally {
+      if (!this.stopped) {
+        this.poller.start();
+      }
+    }
   }
 
   public get events(): Observable<TaskLifecycleEvent> {
@@ -257,6 +294,7 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
   }
 
   public stop() {
+    this.stopped = true;
     this.poller.stop();
   }
 

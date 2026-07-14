@@ -461,6 +461,7 @@ export class TaskManagerPlugin
         usageCounter: this.usageCounter,
         middleware: this.middleware,
         elasticsearchAndSOAvailability$: this.elasticsearchAndSOAvailability$!,
+        featureFlags: core.featureFlags,
         taskPartitioner,
         startingCapacity,
         apiKeyStrategy,
