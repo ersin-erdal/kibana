@@ -258,7 +258,9 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
         // set synchronously so repeat availability emissions (e.g. ES
         // reconnects) can never trigger a second reconciliation or poller start
         this.started = true;
-        this.reconcileAndStartPolling();
+        // fire-and-forget: reconcileAndStartPolling never rejects (it handles
+        // its own errors) and starts the poller when it settles
+        void this.reconcileAndStartPolling();
       }
     });
   }
