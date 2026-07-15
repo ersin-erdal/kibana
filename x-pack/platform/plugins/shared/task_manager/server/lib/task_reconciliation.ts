@@ -13,14 +13,6 @@ import type { TaskStore } from '../task_store';
 import { isOk } from './result_type';
 import { mustBeAllOf, shouldBeOneOf } from '../queries/query_clauses';
 
-/**
- * Feature flag gating startup task reconciliation. Defaults to `false` when no
- * feature flags provider is attached (e.g. self-managed), so the behavior is
- * enabled progressively via the provider on Elastic Cloud Hosted/Serverless.
- */
-export const RESUME_IN_FLIGHT_TASKS_ON_STARTUP_FEATURE_FLAG =
-  'taskManager.resumeInFlightTasksOnStartup';
-
 export const MAX_TASKS_TO_RESET = 10_000;
 const RESET_BATCH_SIZE = 100;
 

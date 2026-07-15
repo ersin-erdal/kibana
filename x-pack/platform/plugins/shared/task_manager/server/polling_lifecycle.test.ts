@@ -6,7 +6,7 @@
  */
 
 import sinon from 'sinon';
-import { Subject, of } from 'rxjs';
+import { Subject } from 'rxjs';
 
 import type { TaskLifecycleEvent } from './polling_lifecycle';
 import { TaskPollingLifecycle, claimAvailableTasks } from './polling_lifecycle';
@@ -26,7 +26,6 @@ import type { Err, Ok } from './lib/result_type';
 import { asOk, isErr, isOk } from './lib/result_type';
 import { FillPoolResult } from './lib/fill_pool';
 import { executionContextServiceMock } from '@kbn/core/server/mocks';
-import { coreFeatureFlagsMock } from '@kbn/core-feature-flags-server-mocks';
 import { TaskCost } from './task';
 import type { TaskEventLogger } from './task';
 import { ApiKeyType, CLAIM_STRATEGY_MGET, DEFAULT_KIBANAS_PER_PARTITION } from './config';
@@ -84,7 +83,6 @@ describe('TaskPollingLifecycle', () => {
   let clock: sinon.SinonFakeTimers;
   const taskManagerLogger = mockLogger();
   const mockTaskStore = taskStoreMock.create({});
-  const mockFeatureFlags = coreFeatureFlagsMock.createStart();
   const taskManagerOpts = {
     config: {
       discovery: {
@@ -137,7 +135,6 @@ describe('TaskPollingLifecycle', () => {
       grant_uiam_api_keys: false,
     },
     taskStore: mockTaskStore,
-    featureFlags: mockFeatureFlags,
     logger: taskManagerLogger,
     definitions: new TaskTypeDictionary(taskManagerLogger),
     middleware: createInitialMiddleware(),
@@ -158,8 +155,6 @@ describe('TaskPollingLifecycle', () => {
     (TaskClaiming as jest.Mock<TaskClaimingClass>).mockClear();
     (TaskManagerRunner as jest.Mock).mockClear();
     resetInFlightTasksMock.mockReset().mockResolvedValue(undefined);
-    // resume-in-flight-tasks feature enabled by default in these tests
-    mockFeatureFlags.getBooleanValue$.mockReset().mockReturnValue(of(true));
     clock = sinon.useFakeTimers();
   });
 
@@ -256,21 +251,6 @@ describe('TaskPollingLifecycle', () => {
       await delay(100);
 
       expect(resetInFlightTasksMock).toHaveBeenCalledTimes(1);
-    });
-
-    test('skips the startup task reconciliation when the feature flag is disabled', async () => {
-      clock.restore();
-      mockFeatureFlags.getBooleanValue$.mockReturnValue(of(false));
-      const elasticsearchAndSOAvailability$ = new Subject<boolean>();
-      new TaskPollingLifecycle({ ...taskManagerOpts, elasticsearchAndSOAvailability$ });
-
-      elasticsearchAndSOAvailability$.next(true);
-
-      await retryUntil(
-        'polling started',
-        () => mockTaskClaiming.claimAvailableTasksIfCapacityIsAvailable.mock.calls.length > 0
-      );
-      expect(resetInFlightTasksMock).not.toHaveBeenCalled();
     });
 
     test('provides TaskClaiming with the capacity available when strategy = CLAIM_STRATEGY_UPDATE_BY_QUERY', () => {

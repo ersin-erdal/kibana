@@ -5,14 +5,14 @@
  * 2.0.
  */
 
-import type { Observable, Subscription } from 'rxjs';
+import type { Observable } from 'rxjs';
 import { Subject, withLatestFrom, BehaviorSubject } from 'rxjs';
 import { distinctUntilChanged, startWith } from 'rxjs';
 import { pipe } from 'fp-ts/pipeable';
 import { map as mapOptional, none } from 'fp-ts/Option';
 import { tap } from 'rxjs';
 import type { UsageCounter } from '@kbn/usage-collection-plugin/server';
-import type { Logger, ExecutionContextStart, FeatureFlagsStart } from '@kbn/core/server';
+import type { Logger, ExecutionContextStart } from '@kbn/core/server';
 import type { FakeRequestEnricher } from '@kbn/core-security-server';
 
 import type { Result } from './lib/result_type';
@@ -63,10 +63,7 @@ import {
   ADJUST_THROUGHPUT_INTERVAL,
 } from './lib/create_managed_configuration';
 import { createRunningAveragedStat } from './monitoring/task_run_calculators';
-import {
-  RESUME_IN_FLIGHT_TASKS_ON_STARTUP_FEATURE_FLAG,
-  resetInFlightTasksOwnedByThisNode,
-} from './lib/task_reconciliation';
+import { resetInFlightTasksOwnedByThisNode } from './lib/task_reconciliation';
 
 const MAX_BUFFER_OPERATIONS = 100;
 
@@ -81,7 +78,6 @@ export interface TaskPollingLifecycleOpts {
   config: TaskManagerConfig;
   middleware: Middleware;
   elasticsearchAndSOAvailability$: Observable<boolean>;
-  featureFlags: FeatureFlagsStart;
   executionContext: ExecutionContextStart;
   usageCounter?: UsageCounter;
   taskPartitioner: TaskPartitioner;
@@ -115,8 +111,6 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
   private poller: TaskPoller<string, TimedFillPoolResult>;
   private started = false;
   private stopped = false;
-  private resumeInFlightTasksOnStartup = false;
-  private featureFlagsSubscription?: Subscription;
 
   public pool: TaskPool;
 
@@ -148,7 +142,6 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
     config,
     // Elasticsearch and SavedObjects availability status
     elasticsearchAndSOAvailability$,
-    featureFlags,
     taskStore,
     definitions,
     executionContext,
@@ -167,15 +160,6 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
     this.usageCounter = usageCounter;
     this.config = config;
     this.apiKeyStrategy = apiKeyStrategy;
-    // Cache the feature flag so the availability handler can branch
-    // synchronously and keep the poller start on the hot path free of an
-    // extra async hop when the feature is disabled (the default).
-    this.featureFlagsSubscription = featureFlags
-      .getBooleanValue$(RESUME_IN_FLIGHT_TASKS_ON_STARTUP_FEATURE_FLAG, false)
-      .pipe(distinctUntilChanged())
-      .subscribe((enabled) => {
-        this.resumeInFlightTasksOnStartup = enabled;
-      });
     this.enrichFakeRequest = enrichFakeRequest;
     const { poll_interval: pollInterval, claim_strategy: claimStrategy } = config;
     this.currentPollInterval = pollInterval;
@@ -267,13 +251,9 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
         // set synchronously so repeat availability emissions (e.g. ES
         // reconnects) can never trigger a second reconciliation or poller start
         this.started = true;
-        if (this.resumeInFlightTasksOnStartup) {
-          // fire-and-forget: reconcileAndStartPolling never rejects (it handles
-          // its own errors) and starts the poller when it settles
-          void this.reconcileAndStartPolling();
-        } else {
-          this.poller.start();
-        }
+        // fire-and-forget: reconcileAndStartPolling never rejects (it handles
+        // its own errors) and starts the poller when it settles
+        void this.reconcileAndStartPolling();
       }
     });
   }
@@ -304,7 +284,6 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
 
   public stop() {
     this.stopped = true;
-    this.featureFlagsSubscription?.unsubscribe();
     this.poller.stop();
   }
 
