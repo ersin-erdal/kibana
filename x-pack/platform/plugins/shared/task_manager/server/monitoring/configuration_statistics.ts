@@ -30,11 +30,19 @@ interface CapacityConfig extends JsonObject {
   };
 }
 
+interface ExecutionControlConfig extends JsonObject {
+  execution_control: {
+    paused: boolean;
+    paused_task_types: string[];
+  };
+}
+
 export type ConfigStat = Pick<
   TaskManagerConfig,
   'poll_interval' | 'claim_strategy' | (typeof CONFIG_FIELDS_TO_EXPOSE)[number]
 > &
-  CapacityConfig;
+  CapacityConfig &
+  ExecutionControlConfig;
 
 export function createConfigurationAggregator(
   config: TaskManagerConfig,
@@ -60,11 +68,25 @@ export function createConfigurationAggregator(
         },
       });
 
+  const executionControl$ = taskPollingLifecycle
+    ? taskPollingLifecycle.executionControl$.pipe(
+        map<{ paused: boolean; pausedTaskTypes: string[] }, ExecutionControlConfig>((state) => ({
+          execution_control: {
+            paused: state.paused,
+            paused_task_types: state.pausedTaskTypes,
+          },
+        }))
+      )
+    : of<ExecutionControlConfig>({
+        execution_control: { paused: false, paused_task_types: [] },
+      });
+
   return combineLatest([
     of(pick(config, ...CONFIG_FIELDS_TO_EXPOSE)),
     of({ claim_strategy: config.claim_strategy ?? CLAIM_STRATEGY_UPDATE_BY_QUERY }),
     of({ poll_interval: config.poll_interval }),
     capacity$,
+    executionControl$,
   ]).pipe(
     map((configurations) => ({
       key: 'configuration',

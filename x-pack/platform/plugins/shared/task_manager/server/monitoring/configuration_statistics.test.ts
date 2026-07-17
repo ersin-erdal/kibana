@@ -29,6 +29,9 @@ describe('Configuration Statistics Aggregator', () => {
         active_nodes_lookback: '30s',
         interval: 10000,
       },
+      execution_control: {
+        poll_interval: 5000,
+      },
       kibanas_per_partition: 2,
       invalidate_api_key_task: {
         interval: '5m',
@@ -96,6 +99,10 @@ describe('Configuration Statistics Aggregator', () => {
                 },
                 custom: {},
               },
+              execution_control: {
+                paused: false,
+                paused_task_types: [],
+              },
             });
             expect(updatedWorkers.value).toEqual({
               capacity: {
@@ -114,6 +121,10 @@ describe('Configuration Statistics Aggregator', () => {
                   warn_threshold: 80,
                 },
                 custom: {},
+              },
+              execution_control: {
+                paused: false,
+                paused_task_types: [],
               },
             });
             resolve();

@@ -5,9 +5,9 @@
  * 2.0.
  */
 
-import type { Observable } from 'rxjs';
+import type { Observable, Subscription } from 'rxjs';
 import { Subject, withLatestFrom, BehaviorSubject } from 'rxjs';
-import { distinctUntilChanged, startWith } from 'rxjs';
+import { distinctUntilChanged, startWith, pairwise } from 'rxjs';
 import { pipe } from 'fp-ts/pipeable';
 import { map as mapOptional, none } from 'fp-ts/Option';
 import { tap } from 'rxjs';
@@ -43,7 +43,7 @@ import type { Middleware } from './lib/middleware';
 import { intervalFromNow } from './lib/intervals';
 import type { ConcreteTaskInstance, TaskEventLogger } from './task';
 import { createTaskPoller, PollingError, PollingErrorType } from './polling';
-import { TaskPool } from './task_pool';
+import { TaskPool, TaskPoolRunResult } from './task_pool';
 import type { TaskRunner } from './task_running';
 import { TaskManagerRunner } from './task_running';
 import type { TaskStore } from './task_store';
@@ -64,6 +64,7 @@ import {
 } from './lib/create_managed_configuration';
 import { createRunningAveragedStat } from './monitoring/task_run_calculators';
 import { resetInFlightTasksOwnedByThisNode } from './lib/task_reconciliation';
+import type { TaskExecutionControlService, TaskExecutionControlState } from './execution_control';
 
 const MAX_BUFFER_OPERATIONS = 100;
 
@@ -78,6 +79,7 @@ export interface TaskPollingLifecycleOpts {
   config: TaskManagerConfig;
   middleware: Middleware;
   elasticsearchAndSOAvailability$: Observable<boolean>;
+  executionControlService: TaskExecutionControlService;
   executionContext: ExecutionContextStart;
   usageCounter?: UsageCounter;
   taskPartitioner: TaskPartitioner;
@@ -111,6 +113,8 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
   private poller: TaskPoller<string, TimedFillPoolResult>;
   private started = false;
   private stopped = false;
+  private readonly executionControlService: TaskExecutionControlService;
+  private executionControlSubscription?: Subscription;
 
   public pool: TaskPool;
 
@@ -142,6 +146,7 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
     config,
     // Elasticsearch and SavedObjects availability status
     elasticsearchAndSOAvailability$,
+    executionControlService,
     taskStore,
     definitions,
     executionContext,
@@ -160,6 +165,7 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
     this.usageCounter = usageCounter;
     this.config = config;
     this.apiKeyStrategy = apiKeyStrategy;
+    this.executionControlService = executionControlService;
     this.enrichFakeRequest = enrichFakeRequest;
     const { poll_interval: pollInterval, claim_strategy: claimStrategy } = config;
     this.currentPollInterval = pollInterval;
@@ -207,9 +213,18 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
       logger: this.logger,
       getAvailableCapacity: (taskType?: string) => this.pool.availableCapacity(taskType),
       taskPartitioner,
+      getExecutionControlState: () => this.executionControlService.getState(),
     });
     // pipe taskClaiming events into the lifecycle event stream
     this.taskClaiming.events.subscribe(emitEvent);
+
+    // React to runtime pause/resume transitions: when execution is paused,
+    // best-effort cancel the tasks that are already running so an overwhelmed
+    // cluster gets immediate relief. Using pairwise() means we only act on
+    // transitions, never on every poll of the unchanged state.
+    this.executionControlSubscription = this.executionControlService.state
+      .pipe(pairwise())
+      .subscribe(([previous, current]) => this.handleExecutionControlTransition(previous, current));
 
     let pollIntervalDelay$: Observable<number> | undefined;
     if (claimStrategy === CLAIM_STRATEGY_UPDATE_BY_QUERY) {
@@ -251,11 +266,60 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
         // set synchronously so repeat availability emissions (e.g. ES
         // reconnects) can never trigger a second reconciliation or poller start
         this.started = true;
-        // fire-and-forget: reconcileAndStartPolling never rejects (it handles
+        // fire-and-forget: initializeAndStartPolling never rejects (it handles
         // its own errors) and starts the poller when it settles
-        void this.reconcileAndStartPolling();
+        void this.initializeAndStartPolling();
       }
     });
+  }
+
+  /**
+   * Ensures the runtime pause state is known before the first claim (so a node
+   * that starts while the cluster is paused does not immediately claim work),
+   * then starts polling. Never rejects.
+   */
+  private async initializeAndStartPolling() {
+    try {
+      // Resolves once the initial pause-state read has settled (or failed open).
+      await this.executionControlService.ready();
+    } catch (e) {
+      this.logger.warn(
+        `Failed to read task execution control state on startup, continuing anyway: ${e.message}`
+      );
+    }
+
+    // Reconcile in-flight tasks owned by this node, then start polling.
+    await this.reconcileAndStartPolling();
+  }
+
+  private handleExecutionControlTransition(
+    previous: TaskExecutionControlState,
+    current: TaskExecutionControlState
+  ) {
+    if (!previous.paused && current.paused) {
+      this.logger.warn(
+        'Task Manager execution has been paused by an operator; task claiming is disabled and running tasks will be cancelled.'
+      );
+      this.pool.cancelRunningTasks();
+      return;
+    }
+
+    if (previous.paused && !current.paused) {
+      this.logger.info('Task Manager execution has been resumed by an operator.');
+    }
+
+    // When only the paused task types changed, cancel the newly-paused types.
+    const newlyPausedTypes = current.pausedTaskTypes.filter(
+      (type) => !previous.pausedTaskTypes.includes(type)
+    );
+    if (newlyPausedTypes.length) {
+      this.logger.warn(
+        `Task Manager execution has been paused by an operator for task types: ${newlyPausedTypes.join(
+          ', '
+        )}; running tasks of these types will be cancelled.`
+      );
+      this.pool.cancelRunningTasksByTypes(newlyPausedTypes);
+    }
   }
 
   /**
@@ -282,8 +346,13 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
     return this.events$;
   }
 
+  public get executionControl$(): Observable<TaskExecutionControlState> {
+    return this.executionControlService.state;
+  }
+
   public stop() {
     this.stopped = true;
+    this.executionControlSubscription?.unsubscribe();
     this.poller.stop();
   }
 
@@ -338,6 +407,14 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
       this.createTaskRunnerForTask,
       // place tasks in the Task Pool
       async (tasks: TaskRunner[]) => {
+        // If a pause landed after tasks were claimed in this cycle, don't start
+        // them; they idle out via retryAt and are reclaimed once resumed.
+        if (this.executionControlService.getState().paused) {
+          this.logger.debug(
+            'Task Manager execution was paused mid-cycle; not running the tasks claimed in this cycle.'
+          );
+          return TaskPoolRunResult.NoTaskWereRan;
+        }
         const tasksToRun = [];
         const removeTaskPromises = [];
         for (const task of tasks) {
