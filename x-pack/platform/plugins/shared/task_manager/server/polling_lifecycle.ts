@@ -213,7 +213,14 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
       logger: this.logger,
       getAvailableCapacity: (taskType?: string) => this.pool.availableCapacity(taskType),
       taskPartitioner,
-      getExecutionControlState: () => this.executionControlService.getState(),
+      // Until the initial control-document read settles, the pause state is
+      // unknown, so treat execution as paused. This ensures a node that
+      // (re)starts while the cluster is paused does not claim tasks before the
+      // persisted state is known.
+      getExecutionControlState: () =>
+        this.executionControlService.isInitialized()
+          ? this.executionControlService.getState()
+          : { paused: true, pausedTaskTypes: [] },
     });
     // pipe taskClaiming events into the lifecycle event stream
     this.taskClaiming.events.subscribe(emitEvent);
@@ -266,30 +273,11 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
         // set synchronously so repeat availability emissions (e.g. ES
         // reconnects) can never trigger a second reconciliation or poller start
         this.started = true;
-        // fire-and-forget: initializeAndStartPolling never rejects (it handles
+        // fire-and-forget: reconcileAndStartPolling never rejects (it handles
         // its own errors) and starts the poller when it settles
-        void this.initializeAndStartPolling();
+        void this.reconcileAndStartPolling();
       }
     });
-  }
-
-  /**
-   * Ensures the runtime pause state is known before the first claim (so a node
-   * that starts while the cluster is paused does not immediately claim work),
-   * then starts polling. Never rejects.
-   */
-  private async initializeAndStartPolling() {
-    try {
-      // Resolves once the initial pause-state read has settled (or failed open).
-      await this.executionControlService.ready();
-    } catch (e) {
-      this.logger.warn(
-        `Failed to read task execution control state on startup, continuing anyway: ${e.message}`
-      );
-    }
-
-    // Reconcile in-flight tasks owned by this node, then start polling.
-    await this.reconcileAndStartPolling();
   }
 
   private handleExecutionControlTransition(

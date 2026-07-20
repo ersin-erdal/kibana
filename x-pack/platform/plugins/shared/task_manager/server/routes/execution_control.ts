@@ -89,7 +89,7 @@ export function executionControlRoutes(params: ExecutionControlRouteParams) {
           schema.nullable(
             schema.object({
               task_types: schema.maybe(
-                schema.arrayOf(schema.string(), { minSize: 1, maxSize: 1000 })
+                schema.arrayOf(schema.string({ maxLength: 256 }), { minSize: 1, maxSize: 1000 })
               ),
             })
           )
@@ -151,7 +151,7 @@ export function executionControlRoutes(params: ExecutionControlRouteParams) {
           schema.nullable(
             schema.object({
               task_types: schema.maybe(
-                schema.arrayOf(schema.string(), { minSize: 1, maxSize: 1000 })
+                schema.arrayOf(schema.string({ maxLength: 256 }), { minSize: 1, maxSize: 1000 })
               ),
             })
           )

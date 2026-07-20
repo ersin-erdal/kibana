@@ -67,6 +67,18 @@ describe('TaskExecutionControlService', () => {
       expect(logger.warn).not.toHaveBeenCalled();
     });
 
+    it('is not initialized until the first read settles', async () => {
+      savedObjectsRepository.get.mockResolvedValue(
+        soResult({ paused: true, paused_task_types: [], updated_at: 'a' })
+      );
+      const service = createService();
+      expect(service.isInitialized()).toBe(false);
+
+      await service.start();
+
+      expect(service.isInitialized()).toBe(true);
+    });
+
     it('applies the persisted paused state on startup', async () => {
       savedObjectsRepository.get.mockResolvedValue(
         soResult({

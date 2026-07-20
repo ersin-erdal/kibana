@@ -148,6 +148,10 @@ export default function ({ getService }: FtrProviderContext) {
           as_cost: 20,
         },
         claim_strategy: 'update_by_query',
+        execution_control: {
+          paused: false,
+          paused_task_types: [],
+        },
       });
     });
 

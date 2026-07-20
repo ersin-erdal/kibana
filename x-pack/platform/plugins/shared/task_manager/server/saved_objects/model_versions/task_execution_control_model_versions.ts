@@ -12,6 +12,7 @@ export const taskExecutionControlModelVersions: SavedObjectsModelVersionMap = {
   '1': {
     changes: [],
     schemas: {
+      forwardCompatibility: taskExecutionControlSchemaV1.extends({}, { unknowns: 'ignore' }),
       create: taskExecutionControlSchemaV1,
     },
   },

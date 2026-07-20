@@ -62,7 +62,10 @@ export class TaskExecutionControlService {
   private stopped = false;
   private timer: NodeJS.Timeout | undefined;
   private hasLoggedReadError = false;
-  private readyPromise: Promise<void> | undefined;
+  private startPromise: Promise<void> | undefined;
+  // Whether the initial control-document read has settled. Until it has, the
+  // pause state is unknown, so consumers must treat execution as paused.
+  private initialized = false;
 
   constructor(opts: TaskExecutionControlServiceParams) {
     this.pollInterval = opts.config.poll_interval;
@@ -79,30 +82,32 @@ export class TaskExecutionControlService {
   }
 
   /**
+   * Whether the initial control-document read has settled. Consumers gate task
+   * claiming on this so a node that (re)starts while the cluster is paused does
+   * not claim before the persisted pause state is known.
+   */
+  public isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  /**
    * Performs an initial read (with bounded retries) and starts the periodic
    * poll. Subsequent calls are no-ops. Never rejects: on a persistent read
    * failure it fails open with the default (unpaused) state and a warning, and
    * the periodic poll corrects the state once Elasticsearch is reachable.
    */
   public start(): Promise<void> {
-    if (!this.readyPromise) {
-      this.readyPromise = this.initialize();
+    if (!this.startPromise) {
+      this.startPromise = this.initialize();
     }
-    return this.readyPromise;
-  }
-
-  /**
-   * Resolves once the initial read has settled. Used by the polling lifecycle
-   * to avoid claiming tasks before the pause state is known on startup.
-   */
-  public ready(): Promise<void> {
-    return this.start();
+    return this.startPromise;
   }
 
   private async initialize(): Promise<void> {
     for (let attempt = 1; attempt <= MAX_INITIAL_READ_RETRIES && !this.stopped; attempt++) {
       try {
         this.applyState(await this.readState());
+        this.initialized = true;
         this.scheduleNextPoll();
         return;
       } catch (e) {
@@ -116,6 +121,7 @@ export class TaskExecutionControlService {
       }
     }
     // Fail open: keep the default state and keep polling so we self-correct.
+    this.initialized = true;
     this.scheduleNextPoll();
   }
 

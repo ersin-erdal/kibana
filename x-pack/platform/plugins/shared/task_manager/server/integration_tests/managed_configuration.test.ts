@@ -153,6 +153,11 @@ describe('managed configuration', () => {
         esStart.client.asInternalUser as unknown as Client
       );
       coreStart.savedObjects.createInternalRepository.mockReturnValue(savedObjectsClient);
+      // No task execution control document exists, so the execution control
+      // service resolves to "not paused" immediately and startup can proceed.
+      savedObjectsClient.get.mockRejectedValue(
+        SavedObjectsErrorHelpers.createGenericNotFoundError('task-execution-control')
+      );
       taskManagerStart = await taskManager.start(coreStart, {
         licensing: licensingMock.createStart(),
       });
@@ -253,6 +258,11 @@ describe('managed configuration', () => {
         esStart.client.asInternalUser as unknown as Client
       );
       coreStart.savedObjects.createInternalRepository.mockReturnValue(savedObjectsClient);
+      // No task execution control document exists, so the execution control
+      // service resolves to "not paused" immediately and startup can proceed.
+      savedObjectsClient.get.mockRejectedValue(
+        SavedObjectsErrorHelpers.createGenericNotFoundError('task-execution-control')
+      );
       taskManagerStart = await taskManager.start(coreStart, {
         licensing: licensingMock.createStart(),
       });
@@ -357,6 +367,11 @@ describe('managed configuration', () => {
         esStart.client.asInternalUser as unknown as Client
       );
       coreStart.savedObjects.createInternalRepository.mockReturnValue(savedObjectsClient);
+      // No task execution control document exists, so the execution control
+      // service resolves to "not paused" immediately and startup can proceed.
+      savedObjectsClient.get.mockRejectedValue(
+        SavedObjectsErrorHelpers.createGenericNotFoundError('task-execution-control')
+      );
       taskManagerStart = await taskManager.start(coreStart, {
         licensing: licensingMock.createStart(),
       });
@@ -444,6 +459,11 @@ describe('managed configuration', () => {
         esStart.client.asInternalUser as unknown as Client
       );
       coreStart.savedObjects.createInternalRepository.mockReturnValue(savedObjectsClient);
+      // No task execution control document exists, so the execution control
+      // service resolves to "not paused" immediately and startup can proceed.
+      savedObjectsClient.get.mockRejectedValue(
+        SavedObjectsErrorHelpers.createGenericNotFoundError('task-execution-control')
+      );
       taskManagerStart = await taskManager.start(coreStart, {
         licensing: licensingMock.createStart(),
       });

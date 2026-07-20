@@ -398,33 +398,6 @@ describe('TaskPollingLifecycle', () => {
 
       expect(cancelSpy).not.toHaveBeenCalled();
     });
-
-    test('waits for the execution control state to be ready before polling', async () => {
-      clock.restore();
-      const executionControlService = taskExecutionControlServiceMock.create();
-      let resolveReady: () => void = () => {};
-      (executionControlService.ready as jest.Mock).mockReturnValue(
-        new Promise<void>((resolve) => {
-          resolveReady = resolve;
-        })
-      );
-      const elasticsearchAndSOAvailability$ = new Subject<boolean>();
-      new TaskPollingLifecycle({
-        ...taskManagerOpts,
-        executionControlService,
-        elasticsearchAndSOAvailability$,
-      });
-
-      elasticsearchAndSOAvailability$.next(true);
-      await delay(100);
-      expect(mockTaskClaiming.claimAvailableTasksIfCapacityIsAvailable).not.toHaveBeenCalled();
-
-      resolveReady();
-      await retryUntil(
-        'polling started',
-        () => mockTaskClaiming.claimAvailableTasksIfCapacityIsAvailable.mock.calls.length > 0
-      );
-    });
   });
 
   describe('claimAvailableTasks', () => {

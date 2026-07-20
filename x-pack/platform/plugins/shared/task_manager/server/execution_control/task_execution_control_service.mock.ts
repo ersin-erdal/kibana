@@ -15,8 +15,8 @@ export const taskExecutionControlServiceMock = {
     return {
       state: state$,
       getState: jest.fn(() => state$.getValue()),
+      isInitialized: jest.fn(() => true),
       start: jest.fn(async () => {}),
-      ready: jest.fn(async () => {}),
       read: jest.fn(async () => ({
         paused: state$.getValue().paused,
         paused_task_types: state$.getValue().pausedTaskTypes,
