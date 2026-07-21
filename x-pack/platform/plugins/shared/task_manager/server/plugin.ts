@@ -507,6 +507,7 @@ export class TaskManagerPlugin
       adHocTaskCounter: this.adHocTaskCounter,
       taskDefinitions: this.definitions,
       taskPollingLifecycle: this.taskPollingLifecycle,
+      executionControlService: this.executionControlService,
       startingCapacity,
     }).subscribe((stat) => this.monitoringStats$.next(stat));
 

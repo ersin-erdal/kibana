@@ -14,6 +14,7 @@ import type { TaskManagerConfig } from '../config';
 import { CLAIM_STRATEGY_UPDATE_BY_QUERY } from '../config';
 import { getCapacityInCost, getCapacityInWorkers } from '../task_pool';
 import type { TaskPollingLifecycle } from '../polling_lifecycle';
+import type { TaskExecutionControlService, TaskExecutionControlState } from '../execution_control';
 
 const CONFIG_FIELDS_TO_EXPOSE = [
   'request_capacity',
@@ -47,7 +48,8 @@ export type ConfigStat = Pick<
 export function createConfigurationAggregator(
   config: TaskManagerConfig,
   startingCapacity: number,
-  taskPollingLifecycle?: TaskPollingLifecycle
+  taskPollingLifecycle?: TaskPollingLifecycle,
+  executionControlService?: TaskExecutionControlService
 ): AggregatedStatProvider<ConfigStat> {
   const capacity$ = taskPollingLifecycle
     ? taskPollingLifecycle.capacityConfiguration$.pipe(
@@ -68,9 +70,12 @@ export function createConfigurationAggregator(
         },
       });
 
-  const executionControl$ = taskPollingLifecycle
-    ? taskPollingLifecycle.executionControl$.pipe(
-        map<{ paused: boolean; pausedTaskTypes: string[] }, ExecutionControlConfig>((state) => ({
+  // The execution control service runs on every node (including UI-only nodes
+  // that have no polling lifecycle), so read the pause state from it directly
+  // to keep the health output consistent everywhere.
+  const executionControl$ = executionControlService
+    ? executionControlService.state.pipe(
+        map<TaskExecutionControlState, ExecutionControlConfig>((state) => ({
           execution_control: {
             paused: state.paused,
             paused_task_types: state.pausedTaskTypes,

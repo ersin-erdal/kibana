@@ -334,10 +334,6 @@ export class TaskPollingLifecycle implements ITaskEventEmitter<TaskLifecycleEven
     return this.events$;
   }
 
-  public get executionControl$(): Observable<TaskExecutionControlState> {
-    return this.executionControlService.state;
-  }
-
   public stop() {
     this.stopped = true;
     this.executionControlSubscription?.unsubscribe();

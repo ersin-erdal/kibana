@@ -8,8 +8,6 @@
 import type { TaskPollingLifecycle, TaskLifecycleEvent } from './polling_lifecycle';
 import type { Observable } from 'rxjs';
 import { of } from 'rxjs';
-import type { TaskExecutionControlState } from './execution_control';
-import { DEFAULT_EXECUTION_CONTROL_STATE } from './execution_control';
 
 export const taskPollingLifecycleMock = {
   create(opts: {
@@ -17,12 +15,10 @@ export const taskPollingLifecycleMock = {
     events$?: Observable<TaskLifecycleEvent>;
     pollIntervalConfiguration$?: Observable<number>;
     capacityConfiguration$?: Observable<number>;
-    executionControl$?: Observable<TaskExecutionControlState>;
   }) {
     return {
       pollIntervalConfiguration$: opts.pollIntervalConfiguration$ ?? of(),
       capacityConfiguration$: opts.capacityConfiguration$ ?? of(),
-      executionControl$: opts.executionControl$ ?? of(DEFAULT_EXECUTION_CONTROL_STATE),
       attemptToRun: jest.fn(),
       stop: jest.fn(),
       getCurrentTasksInPool: jest.fn(),
