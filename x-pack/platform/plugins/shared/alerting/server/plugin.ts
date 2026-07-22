@@ -36,6 +36,7 @@ import type {
   CoreStatus,
 } from '@kbn/core/server';
 import { ServiceStatusLevels } from '@kbn/core/server';
+import { LockManagerService } from '@kbn/lock-manager';
 import type { LicensingPluginSetup, LicensingPluginStart } from '@kbn/licensing-plugin/server';
 import { LICENSE_TYPE } from '@kbn/licensing-types';
 import type {
@@ -367,6 +368,11 @@ export class AlertingPlugin {
           elasticsearchAndSOAvailability$,
           isServerless: this.isServerless,
           totalFieldsLimit: this.config.alertsService.totalFieldsLimit,
+          // Coordinate resource installation across nodes with a cluster-wide lock
+          // unless disabled via config.
+          lockManager: this.config.alertsService.coordinateInstallation
+            ? new LockManagerService(core, this.logger)
+            : undefined,
         });
       }
     }

@@ -303,6 +303,33 @@ describe('Alerts Service', () => {
           expect(componentTemplate3.name).toEqual('.alerts-ecs-mappings');
         });
 
+        test('should install common resources under a cluster-wide lock when a lock manager is provided', async () => {
+          const withLock = jest.fn(async (_lockId: string, cb: () => Promise<void>) => cb());
+          const alertsService = new AlertsService({
+            logger,
+            elasticsearchClientPromise: Promise.resolve(clusterClient),
+            pluginStop$,
+            kibanaVersion: '8.8.0',
+            dataStreamAdapter,
+            elasticsearchAndSOAvailability$,
+            isServerless: false,
+            lockManager: { withLock },
+          });
+
+          await retryUntil(
+            'alert service initialized',
+            async () => alertsService.isInitialized() === true
+          );
+
+          // The common install ran inside the lock...
+          expect(withLock).toHaveBeenCalledWith(
+            'alerting:resource-install:common',
+            expect.any(Function)
+          );
+          // ...and the resources were still installed.
+          expect(clusterClient.cluster.putComponentTemplate).toHaveBeenCalledTimes(3);
+        });
+
         test('should not initialize common resources if ES is not ready', async () => {
           const test$ = new Subject<boolean>();
           const alertsService = new AlertsService({
